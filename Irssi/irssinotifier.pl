@@ -4,6 +4,10 @@ use Irssi;
 use IPC::Open2 qw(open2);
 use POSIX;
 use Encode;
+use LWP::UserAgent;
+use LWP::Protocol::https;
+use URI;
+use URI::Escape;
 use vars qw($VERSION %IRSSI);
 
 $VERSION = "16";
@@ -226,11 +230,20 @@ sub send_notification {
                 $ENV{https_proxy} = $proxy;
             }
 
-            my $data = "--post-data=apiToken=$api_token\\&message=$lastMsg\\&channel=$lastTarget\\&nick=$lastNick\\&version=$VERSION";
-            my $result = `wget --tries=1 --timeout=5 --no-check-certificate -qO- /dev/null $data https://irssinotifier.appspot.com/API/Message`;
-            if (($? >> 8) != 0) {
+            my $browser = LWP::UserAgent->new;
+            my $api_uri = URI->new("https://irssinotifier.appspot.com/API/Message");
+
+            $api_uri->query_form( 'apiToken'  => $api_token,
+                                  'message'   => uri_escape($lastMsg),
+                                  'channel'   => uri_escape($lastTarget),
+                                  'nick'      => uri_escape($lastNick),
+                                  'version'   => $VERSION );
+
+            my $response = $browser->post($api_uri);
+
+            if (!$response->is_success) {
                 # Something went wrong, might be network error or authorization issue. Probably no need to alert user, though.
-                print $writeHandle "0 FAIL\n";
+                print $writeHandle "0 FAIL: " . $response->status_line . "\n";
             } else {
                 print $writeHandle "1 OK\n";
             }
@@ -339,12 +352,6 @@ sub are_settings_valid {
     `openssl version`;
     if ($? != 0) {
         Irssi::print("IrssiNotifier: openssl not found.");
-        return 0;
-    }
-
-    `wget --version`;
-    if ($? != 0) {
-        Irssi::print("IrssiNotifier: wget not found.");
         return 0;
     }
 
